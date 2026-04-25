@@ -10,10 +10,22 @@ import emailUtils from '../utils/email-utils';
 import roleService from '../service/role-service';
 import userService from '../service/user-service';
 import telegramService from '../service/telegram-service';
+import { isWebhookEnabled, forwardWorkerEmailToWebhook } from './webhook';
 
 export async function email(message, env, ctx) {
 
 	try {
+		if (isWebhookEnabled(env)) {
+			let rcpt = '';
+			try {
+				rcpt = typeof message?.to === 'string' ? message.to : '';
+			} catch (_) { }
+
+			console.log(`[Webhook] 收到邮件事件 -> rcpt=${rcpt || 'unknown'}`);
+			const result = await forwardWorkerEmailToWebhook(message, env);
+			console.log(`[Webhook] 转发流程结束 -> rcpt=${rcpt || 'unknown'} result=${JSON.stringify(result)}`);
+			return;
+		}
 
 		const {
 			receive,
@@ -31,7 +43,6 @@ export async function email(message, env, ctx) {
 			message.setReject('Service suspended');
 			return;
 		}
-
 
 		const reader = message.raw.getReader();
 		let content = '';
@@ -51,10 +62,10 @@ export async function email(message, env, ctx) {
 			return;
 		}
 
-		let userRow = {}
+		let userRow = {};
 
 		if (account) {
-			 userRow = await userService.selectByIdIncludeDel({ env: env }, account.userId);
+			userRow = await userService.selectByIdIncludeDel({ env: env }, account.userId);
 		}
 
 		if (account && userRow.email !== env.admin) {
@@ -66,16 +77,14 @@ export async function email(message, env, ctx) {
 				return;
 			}
 
-			if(roleService.isBanEmail(banEmail, email.from.address)) {
+			if (roleService.isBanEmail(banEmail, email.from.address)) {
 				message.setReject('The recipient is disabled from receiving emails.');
 				return;
 			}
-
 		}
 
-
 		if (!email.to) {
-			email.to = [{ address: message.to, name: emailUtils.getName(message.to)}]
+			email.to = [{ address: message.to, name: emailUtils.getName(message.to) }];
 		}
 
 		const toName = email.to.find(item => item.address === message.to)?.name || '';
@@ -131,41 +140,33 @@ export async function email(message, env, ctx) {
 
 		emailRow = await emailService.completeReceive({ env }, account ? emailConst.status.RECEIVE : emailConst.status.NOONE, emailRow.emailId);
 
-
 		if (ruleType === settingConst.ruleType.RULE) {
-
 			const emails = ruleEmail.split(',');
-
 			if (!emails.includes(message.to)) {
 				return;
 			}
-
 		}
 
-		//转发到TG
+		// 转发到TG
 		if (tgBotStatus === settingConst.tgBotStatus.OPEN && tgChatId) {
-			await telegramService.sendEmailToBot({ env }, emailRow)
+			await telegramService.sendEmailToBot({ env }, emailRow);
 		}
 
-		//转发到其他邮箱
+		// 转发到其他邮箱
 		if (forwardStatus === settingConst.forwardStatus.OPEN && forwardEmail) {
-
 			const emails = forwardEmail.split(',');
 
 			await Promise.all(emails.map(async email => {
-
 				try {
 					await message.forward(email);
 				} catch (e) {
 					console.error(`转发邮箱 ${email} 失败：`, e);
 				}
-
 			}));
-
 		}
 
 	} catch (e) {
 		console.error('邮件接收异常: ', e);
-		throw e
+		throw e;
 	}
 }

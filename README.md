@@ -137,6 +137,63 @@ cloud-mail
 └── └── env.release				# 项目配置
 ```
 
+## Webhook 收信模式
+
+当 `EMAIL_WEBHOOK_URL` 和 `EMAIL_WEBHOOK_SECRET` 同时非空时，Cloud Mail 会启用 **Webhook 收信模式**：
+
+- 收到邮件后，直接转发到你的后端 API
+- **不再走原有站内入库/前端展示链路**
+- 适合将邮件交给你自己的服务做验证码提取、Redis 存储、业务处理
+
+如果任意一个未配置，则保持原有收信逻辑不变。
+
+### 环境变量
+
+在 `mail-worker/wrangler.toml` 或 Cloudflare Worker Variables 中配置：
+
+```toml
+EMAIL_WEBHOOK_URL="https://your-domain.com"
+EMAIL_WEBHOOK_SECRET="your-secret"
+EMAIL_WEBHOOK_TIMEOUT_MS="10000"
+```
+
+说明：
+
+- `EMAIL_WEBHOOK_URL`：Webhook 基础地址；如果只填写根地址，系统会自动补全为 `/api/webhook/email`
+- `EMAIL_WEBHOOK_SECRET`：鉴权密钥，会放在请求头 `X-Webhook-Secret` 中
+- `EMAIL_WEBHOOK_TIMEOUT_MS`：请求超时（毫秒），默认 `10000`
+
+### 请求格式
+
+Cloud Mail 会向你的接口发送：
+
+```http
+POST /api/webhook/email
+Content-Type: application/json
+X-Webhook-Secret: your-secret
+```
+
+```json
+{
+  "message_id": "<message-id@example.com>",
+  "to_addr": "target@example.com",
+  "raw_content": "完整 RFC822 原始邮件内容",
+  "from_addr": "sender@example.com"
+}
+```
+
+### 调试日志
+
+启用 Webhook 后，Worker 日志会打印：
+
+- 收到邮件事件
+- 准备发送 webhook
+- 实际请求 URL
+- 响应状态码
+- 成功/失败返回内容
+
+便于快速定位是“没发出去”还是“后端返回错误”。
+
 ## 赞助
 
 <a href="https://doc.skymail.ink/support.html" >
